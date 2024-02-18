@@ -80,7 +80,7 @@ class Worker_GPT2:
 			num_beams=2,
 			min_length=20,
 			max_length=100,
-			temperature=0.39,
+			temperature=0.76,
 			do_sample=True,
 			early_stopping=True,
 			no_repeat_ngram_size=2,
