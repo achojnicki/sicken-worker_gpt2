@@ -1,6 +1,7 @@
-from sicken import constants
-from adisconfig import adisconfig
-from log import Log
+from adistools.adisconfig import adisconfig
+from adistools.log import Log
+from sicken.sicken.gpt2 import Sicken
+
 from pymongo import MongoClient
 from pika import BlockingConnection, ConnectionParameters, PlainCredentials
 from json import loads, dumps
@@ -11,83 +12,50 @@ class Worker_GPT2:
 	project_name='sicken-worker_gpt2_chat'
 
 	def __init__(self):
-		self.config=adisconfig('/opt/adistools/configs/sicken-worker_gpt2_chat.yaml')
-		self.log=Log(
+		self._config=adisconfig('/opt/adistools/configs/sicken-worker_gpt2.yaml')
+		self._log=Log(
 			parent=self,
-			rabbitmq_host=self.config.rabbitmq.host,
-			rabbitmq_port=self.config.rabbitmq.port,
-			rabbitmq_user=self.config.rabbitmq.user,
-			rabbitmq_passwd=self.config.rabbitmq.password,
-			debug=self.config.log.debug,
+			rabbitmq_host=self._config.rabbitmq.host,
+			rabbitmq_port=self._config.rabbitmq.port,
+			rabbitmq_user=self._config.rabbitmq.user,
+			rabbitmq_passwd=self._config.rabbitmq.password,
+			debug=self._config.log.debug,
 			)
 
-		self.log.info('Initialisation of sicken-worker_gpt2_chat started')
-		self._init_mongo()
-		self._init_rabbitmq()
-		self._init_model()
-		self._init_tokenizer()
-		self.log.success('Initialisation of sicken-worker_gpt2_chat succeed')
+		self._log.info(f'Initialisation of {self.project_name} started')
+	
+		self._sicken=Sicken(
+			root=self,
+			model=self._config.worker_gpt2.model,
+			tokenizer=self._config.worker_gpt2.tokenizer)
 
-	def _init_model(self):
-		self._gpt2_model=GPT2LMHeadModel.from_pretrained(self._get_gpt2_model(), local_files_only=True)
-
-	def _init_tokenizer(self):
-		self._gpt2_tokenizer=AutoTokenizer.from_pretrained(self._get_gpt2_tokenizer(), local_files_only=True)
-		self._gpt2_tokenizer.pad_token_id = self._gpt2_tokenizer.eos_token_id
-
-	def _init_mongo(self):
 		self._mongo_cli=MongoClient(
-			self.config.mongo.host,
-			self.config.mongo.port
+			self._config.mongo.host,
+			self._config.mongo.port
 			)
-		self._mongo_db=self._mongo_cli[self.config.mongo.db]
 
-
-	def _init_rabbitmq(self):
+		self._mongo_db=self._mongo_cli[self._config.mongo.db]
+		
 		self._rabbitmq_conn=BlockingConnection(
 			ConnectionParameters(
-				host=self.config.rabbitmq.host,
-				port=self.config.rabbitmq.port,
+				host=self._config.rabbitmq.host,
+				port=self._config.rabbitmq.port,
 				credentials=PlainCredentials(
-					self.config.rabbitmq.user,
-					self.config.rabbitmq.password
+					self._config.rabbitmq.user,
+					self._config.rabbitmq.password
 					)
 				)
 			)
 		self._rabbitmq_channel=self._rabbitmq_conn.channel()
 		self._rabbitmq_channel.basic_consume(
-			queue="sicken-requests_gpt2_chat",
+			queue="sicken-requests_gpt2",
 			auto_ack=True,
 			on_message_callback=self._callback
 			)
 
-	def _get_gpt2_model(self):
-		model=self.config.worker_gpt2.model
-		return constants.Sicken.models_path / "gpt2" /  model
+		self._log.success(f'Initialisation of {self.project_name} succeed')
+	
 
-	def _get_gpt2_tokenizer(self):
-		tokenizer=self.config.worker_gpt2.tokenizer
-		return constants.Sicken.tokenizers_path / "gpt2" /  tokenizer
-
-	def _get_answer(self, question):
-		features=self._gpt2_tokenizer(question, return_tensors='pt')
-
-		gen_outputs=self._gpt2_model.generate(
-			**features,
-			return_dict_in_generate=True,
-			output_scores=True,
-			#max_new_tokens=100000,
-			num_beams=2,
-			min_length=20,
-			max_length=100,
-			temperature=0.76,
-			do_sample=True,
-			early_stopping=True,
-			no_repeat_ngram_size=2,
-			length_penalty=2,            
-
-			)
-		return self._gpt2_tokenizer.decode(gen_outputs[0][0], skip_special_tokens=True)
 
 	def _build_response_message(self, user_uuid, chat_uuid, socketio_session_id, message):
 		return dumps({
@@ -101,7 +69,7 @@ class Worker_GPT2:
 	def _callback(self, channel, method, properties, body):
 		msg=body.decode('utf-8')
 		msg=loads(msg)
-		response=self._get_answer(msg['message'])
+		response=self._sicken.get_answer(msg)
 
 		msg=self._build_response_message(
 			user_uuid="95a952c4-0deb-4382-9a51-1932c31c9bc0",
@@ -111,7 +79,7 @@ class Worker_GPT2:
 
 		self._rabbitmq_channel.basic_publish(
 			exchange="",
-			routing_key="sicken-responses_chat",
+			routing_key="sicken-responses",
 			body=msg)
 
 

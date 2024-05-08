@@ -1,3 +1,3 @@
-name: sicken-worker_gpt2_chat
-exec: /opt/homebrew/Cellar/python@3.11/3.11.6_1/bin/python3
+name: sicken-worker_gpt2
+exec: /opt/homebrew/bin/python3
 script: __main__.py
